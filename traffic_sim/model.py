@@ -2,6 +2,7 @@
 
 from collections import deque
 from dataclasses import dataclass, field
+from math import isfinite
 import random
 from typing import Optional
 
@@ -26,15 +27,50 @@ class Config:
     headway_min: float = 1.8
     headway_max: float = 2.6
     seed: int = 42
+    # Пары (начало периода в секундах, интенсивности авт./ч).
+    # None сохраняет прежний стационарный поток из rates.
+    rate_schedule: tuple[tuple[float, dict[str, float]], ...] | None = None
 
     def __post_init__(self):
         if set(self.rates) != set(DIRECTIONS) or any(v < 0 for v in self.rates.values()):
             raise ValueError("Нужны неотрицательные интенсивности для N, S, E и W")
-        if any(value <= 0 for value in (
+        if any(value <= 0 or not isfinite(value) for value in (
             self.arrival_duration, self.green_duration, self.yellow_duration,
             self.all_red_duration, self.first_vehicle_delay, self.headway_min,
-        )) or self.headway_max < self.headway_min:
+        )) or not isfinite(self.headway_max) or self.headway_max < self.headway_min:
             raise ValueError("Некорректные длительности в Config")
+
+        if any(not isfinite(v) for v in self.rates.values()):
+            raise ValueError("Интенсивности должны быть конечными числами")
+
+        if self.rate_schedule is not None:
+            if not self.rate_schedule or self.rate_schedule[0][0] != 0:
+                raise ValueError("Расписание должно начинаться с t=0")
+
+            last_start = -1.0
+            for start, period_rates in self.rate_schedule:
+                if not isfinite(start) or not last_start < start < self.arrival_duration:
+                    raise ValueError("Начала периодов должны возрастать и быть меньше горизонта")
+                if set(period_rates) != set(DIRECTIONS) or any(
+                    not isfinite(v) or v < 0 for v in period_rates.values()
+                ):
+                    raise ValueError("Некорректные интенсивности в расписании")
+                last_start = start
+
+    def average_rates(self) -> dict[str, float]:
+        """Средние интенсивности за весь час; используются в фиксированном плане."""
+        if self.rate_schedule is None:
+            return dict(self.rates)
+
+        total = {direction: 0.0 for direction in DIRECTIONS}
+        for index, (start, period_rates) in enumerate(self.rate_schedule):
+            end = (self.rate_schedule[index + 1][0]
+                   if index + 1 < len(self.rate_schedule)
+                   else self.arrival_duration)
+            for direction in DIRECTIONS:
+                total[direction] += period_rates[direction] * (end - start)
+
+        return {d: total[d] / self.arrival_duration for d in DIRECTIONS}
 
 
 @dataclass(frozen=True)
@@ -49,12 +85,7 @@ class Intersection:
         self.env = env
         self.config = config
         self.queues = {direction: deque() for direction in DIRECTIONS}
-        # История изменения очередей:
-        # (модельное время, (N, S, E, W))
         self.queue_history = [(0.0, (0, 0, 0, 0))]
-
-        # История светофорных фаз:
-        # (модельное время, активная зелёная фаза)
         self.phase_history = [(0.0, None)]
         self.arrival_rng = {
             direction: random.Random(config.seed + index)
@@ -91,7 +122,6 @@ class Intersection:
 
     def _notify_state(self):
         lengths = tuple(len(self.queues[d]) for d in DIRECTIONS)
-
         if lengths != self.queue_history[-1][1]:
             self.queue_history.append((self.env.now, lengths))
 
@@ -115,25 +145,40 @@ class Intersection:
         self._notify_state()
 
     def generate(self, direction: str):
-        """Независимый пуассоновский поток автомобилей одного направления."""
-        rate_per_second = self.config.rates[direction] / 3600.0
+        """Пуассоновский поток с кусочно-постоянной интенсивностью."""
+        schedule = self.config.rate_schedule
+        if schedule is None:
+            schedule = ((0.0, self.config.rates),)
+
         rng = self.arrival_rng[direction]
         deadline = self.config.arrival_duration
 
-        while self.env.now < deadline:
-            if rate_per_second == 0:
-                yield self.env.timeout(deadline - self.env.now)
-                break
-            interval = rng.expovariate(rate_per_second)
-            if self.env.now + interval >= deadline:
-                yield self.env.timeout(deadline - self.env.now)
-                break
+        for index, (start, period_rates) in enumerate(schedule):
+            end = schedule[index + 1][0] if index + 1 < len(schedule) else deadline
+            rate_per_second = period_rates[direction] / 3600.0
 
-            yield self.env.timeout(interval)
-            self._update_queue_area()
-            self.arrived += 1
-            self.queues[direction].append(Vehicle(self.arrived, direction, self.env.now))
-            self._notify_state()
+            if self.env.now < start:
+                yield self.env.timeout(start - self.env.now)
+
+            while self.env.now < end:
+                if rate_per_second == 0:
+                    yield self.env.timeout(end - self.env.now)
+                    break
+
+                interval = rng.expovariate(rate_per_second)
+                if self.env.now + interval >= end:
+                    # Следующее прибытие не попало в текущий период.
+                    # Переходим к границе и используем новую интенсивность.
+                    yield self.env.timeout(end - self.env.now)
+                    break
+
+                yield self.env.timeout(interval)
+                self._update_queue_area()
+                self.arrived += 1
+                self.queues[direction].append(
+                    Vehicle(self.arrived, direction, self.env.now)
+                )
+                self._notify_state()
 
         self.finished_generators += 1
         self._check_finished()
@@ -206,3 +251,4 @@ class Intersection:
             "horizon": self.at_horizon,
             "cleared_at": self.env.now,
         }
+
