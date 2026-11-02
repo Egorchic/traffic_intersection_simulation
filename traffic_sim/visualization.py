@@ -58,6 +58,10 @@ def save_wait_plots(
     }
 
     for vehicle, departure_time in intersection.completed:
+        if departure_time >= horizon:
+            continue
+
+        minute_index = int(departure_time // 60)
         minute_index = int(min(departure_time, horizon - 1e-9) // 60)
         wait = departure_time - vehicle.arrived_at
         waits_per_minute[vehicle.direction][minute_index].append(wait)
@@ -71,7 +75,7 @@ def save_wait_plots(
             if bucket:
                 mean_series.append(sum(bucket) / len(bucket))
             else:
-                mean_series.append(0.0)
+                mean_series.append(float("nan"))
 
         ax.plot(minutes, mean_series, label=direction)
 
