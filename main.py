@@ -5,6 +5,8 @@ import simpy
 from traffic_sim.controllers import fixed_time_controller
 from traffic_sim.model import Config, DIRECTIONS, Intersection
 
+from traffic_sim.visualization import save_plots
+
 
 def run(config: Config) -> Intersection:
     env = simpy.Environment()
@@ -23,7 +25,16 @@ def run(config: Config) -> Intersection:
 
 
 def main():
-    intersection = run(Config())
+    intersection = run(
+        Config(
+            rates={
+                "N": 600,
+                "S": 600,
+                "E": 150,
+                "W": 150,
+            }
+        )
+    )
     result = intersection.report()
 
     print("=== Фиксированный светофор ===")
@@ -36,6 +47,8 @@ def main():
     print("Средние длины очередей за первый час:")
     for direction, value in result["mean_queue_lengths"].items():
         print(f"  {direction}: {value:.2f} авт.")
+
+    save_plots(intersection)
 
 
 if __name__ == "__main__":

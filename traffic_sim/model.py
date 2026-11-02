@@ -49,6 +49,13 @@ class Intersection:
         self.env = env
         self.config = config
         self.queues = {direction: deque() for direction in DIRECTIONS}
+        # История изменения очередей:
+        # (модельное время, (N, S, E, W))
+        self.queue_history = [(0.0, (0, 0, 0, 0))]
+
+        # История светофорных фаз:
+        # (модельное время, активная зелёная фаза)
+        self.phase_history = [(0.0, None)]
         self.arrival_rng = {
             direction: random.Random(config.seed + index)
             for index, direction in enumerate(DIRECTIONS)
@@ -83,6 +90,11 @@ class Intersection:
         self.last_area_update = now
 
     def _notify_state(self):
+        lengths = tuple(len(self.queues[d]) for d in DIRECTIONS)
+
+        if lengths != self.queue_history[-1][1]:
+            self.queue_history.append((self.env.now, lengths))
+
         previous = self.state_changed
         self.state_changed = self.env.event()
         previous.succeed()
@@ -93,6 +105,8 @@ class Intersection:
             raise ValueError("Неизвестная светофорная фаза")
         self.green_phase = phase
         self.green_until = until
+        if phase != self.phase_history[-1][1]:
+            self.phase_history.append((self.env.now, phase))
         if phase is not None:
             self.green_epoch += 1
         previous = self.phase_changed
