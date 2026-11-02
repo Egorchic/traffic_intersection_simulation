@@ -34,6 +34,17 @@ class IntersectionTests(unittest.TestCase):
         self.assertTrue(all(vehicle.direction == "N"
                             for vehicle, _ in model.completed))
 
+    def test_adaptive_all_vehicles_depart(self):
+        model = run(
+            Config(arrival_duration=300, seed=123),
+            controller="adaptive",
+        )
+
+        self.assertEqual(model.arrived, model.departed)
+        self.assertTrue(
+            all(not q for q in model.queues.values())
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
