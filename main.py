@@ -9,7 +9,7 @@ from traffic_sim.controllers import (
 
 from traffic_sim.model import Config, DIRECTIONS, Intersection
 
-from traffic_sim.visualization import save_plots
+from traffic_sim.visualization import save_plots, save_wait_plots
 
 
 def run(
@@ -67,6 +67,10 @@ def main():
             print(f"  {direction}: {value:.2f}")
 
         save_plots(
+            intersection,
+            output_dir=f"results/{controller}",
+        )
+        save_wait_plots(
             intersection,
             output_dir=f"results/{controller}",
         )
