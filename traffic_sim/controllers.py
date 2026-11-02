@@ -81,3 +81,50 @@ def adaptive_controller(
         yield env.timeout(config.all_red_duration)
 
         current_phase = other_phase
+
+
+def proportional_fixed_controller(
+    intersection: Intersection,
+    config: Config,
+    min_green: float = 10.0,
+):
+    """Фиксированные фазы, пропорциональные средней нагрузке."""
+    env = intersection.env
+
+    ns_rate = config.rates["N"] + config.rates["S"]
+    ew_rate = config.rates["E"] + config.rates["W"]
+    total_rate = ns_rate + ew_rate
+
+    total_green = 2 * config.green_duration
+
+    if not 0 < min_green < total_green / 2:
+        raise ValueError("Некорректное минимальное время зелёного")
+
+    if total_rate == 0:
+        ns_green = total_green / 2
+    else:
+        ns_green = total_green * ns_rate / total_rate
+
+    # Ограничиваем минимальное время второй фазы.
+    ns_green = max(
+        min_green,
+        min(ns_green, total_green - min_green),
+    )
+    ew_green = total_green - ns_green
+
+    while True:
+        for phase, duration in (
+            ("NS", ns_green),
+            ("EW", ew_green),
+        ):
+            intersection.set_green_phase(
+                phase,
+                until=env.now + duration,
+            )
+            yield env.timeout(duration)
+
+            intersection.set_green_phase(None)
+            yield env.timeout(config.yellow_duration)
+
+            intersection.set_green_phase(None)
+            yield env.timeout(config.all_red_duration)

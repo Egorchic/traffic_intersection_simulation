@@ -5,6 +5,7 @@ import simpy
 from traffic_sim.controllers import (
     fixed_time_controller,
     adaptive_controller,
+    proportional_fixed_controller
 )
 
 from traffic_sim.model import Config, DIRECTIONS, Intersection
@@ -23,6 +24,8 @@ def run(
         controller_function = fixed_time_controller
     elif controller == "adaptive":
         controller_function = adaptive_controller
+    elif controller == "fixed_proportional":
+        controller_function = proportional_fixed_controller
     else:
         raise ValueError(f"Неизвестный контроллер: {controller}")
 
