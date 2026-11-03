@@ -16,9 +16,18 @@ from traffic_sim.visualization import save_plots, save_wait_plots
 def run(
     config: Config,
     controller: str = "fixed",
+    *,
+    controller_kwargs: dict | None = None
 ) -> Intersection:
     env = simpy.Environment()
     intersection = Intersection(env, config)
+
+    kwargs = controller_kwargs or {}
+
+    if controller != "adaptive" and kwargs:
+        raise ValueError(
+            "Дополнительные параметры доступны только adaptive"
+        )
 
     if controller == "fixed":
         controller_function = fixed_time_controller
@@ -30,7 +39,9 @@ def run(
         raise ValueError(f"Неизвестный контроллер: {controller}")
 
     env.process(intersection.snapshot_at_horizon())
-    env.process(controller_function(intersection, config))
+    env.process(
+        controller_function(intersection, config, **kwargs)
+    )
 
     for direction in DIRECTIONS:
         env.process(intersection.generate(direction))
